@@ -36,6 +36,20 @@ module dolpinder_profile::profiles {
         index: u64,
     }
 
+    /// 🎓 Certificate NFT - Chứng chỉ của user
+    public struct CertificateNFT has key, store {
+        id: UID,
+        owner: address,
+        profile_id: address,  // Link tới ProfileNFT
+        title: string::String,
+        issuer: string::String,  // Tổ chức cấp
+        issue_date: string::String,
+        certificate_url: string::String,  // Link to certificate image/PDF
+        description: string::String,
+        credential_id: string::String,  // ID chứng chỉ (nếu có)
+        created_at: u64,
+    }
+
     /// 📦 Registry theo dõi tất cả profiles (shared object)
     public struct ProfileRegistry has key {
         id: UID,
@@ -59,6 +73,14 @@ module dolpinder_profile::profiles {
         owner: address,
     }
 
+    /// 🔹 Sự kiện khi certificate được tạo
+    public struct CertificateCreated has copy, drop {
+        certificate_id: address,
+        owner: address,
+        profile_id: address,
+        title: string::String,
+    }
+
     /// 🎯 Init - Tạo Display cho NFT và Registry
     fun init(otw: PROFILES, ctx: &mut sui::tx_context::TxContext) {
         // Tạo Publisher từ OTW
@@ -75,9 +97,23 @@ module dolpinder_profile::profiles {
         
         display::update_version(&mut display);
         
-        // Transfer publisher và display cho deployer
+        // Tạo Display cho Certificate NFT
+        let mut cert_display = display::new<CertificateNFT>(&publisher, ctx);
+        
+        display::add(&mut cert_display, string::utf8(b"name"), string::utf8(b"{title}"));
+        display::add(&mut cert_display, string::utf8(b"description"), string::utf8(b"{description}"));
+        display::add(&mut cert_display, string::utf8(b"image_url"), string::utf8(b"{certificate_url}"));
+        display::add(&mut cert_display, string::utf8(b"issuer"), string::utf8(b"{issuer}"));
+        display::add(&mut cert_display, string::utf8(b"issue_date"), string::utf8(b"{issue_date}"));
+        display::add(&mut cert_display, string::utf8(b"credential_id"), string::utf8(b"{credential_id}"));
+        display::add(&mut cert_display, string::utf8(b"creator"), string::utf8(b"Dolpinder Profile"));
+        
+        display::update_version(&mut cert_display);
+        
+        // Transfer publisher và displays cho deployer
         transfer::public_transfer(publisher, sender(ctx));
         transfer::public_transfer(display, sender(ctx));
+        transfer::public_transfer(cert_display, sender(ctx));
 
         // Tạo shared registry
         let registry = ProfileRegistry {
@@ -239,6 +275,97 @@ module dolpinder_profile::profiles {
         // Project tự động drop
     }
 
+    // === Certificate Functions ===
+
+    /// 🎓 Tạo Certificate NFT
+    entry fun mint_certificate(
+        profile: &ProfileNFT,
+        title: string::String,
+        issuer: string::String,
+        issue_date: string::String,
+        certificate_url: string::String,
+        description: string::String,
+        credential_id: string::String,
+        clock: &sui::clock::Clock,
+        ctx: &mut sui::tx_context::TxContext
+    ) {
+        let sender_addr = sender(ctx);
+        
+        // Chỉ owner của profile mới tạo certificate được
+        assert!(profile.owner == sender_addr, 2);
+        
+        let certificate = CertificateNFT {
+            id: object::new(ctx),
+            owner: sender_addr,
+            profile_id: object::uid_to_address(&profile.id),
+            title,
+            issuer,
+            issue_date,
+            certificate_url,
+            description,
+            credential_id,
+            created_at: sui::clock::timestamp_ms(clock),
+        };
+        
+        let cert_id = object::uid_to_address(&certificate.id);
+        
+        event::emit(CertificateCreated {
+            certificate_id: cert_id,
+            owner: sender_addr,
+            profile_id: object::uid_to_address(&profile.id),
+            title: certificate.title,
+        });
+        
+        // Transfer certificate cho user (có thể trade vì có store)
+        transfer::public_transfer(certificate, sender_addr);
+    }
+
+    /// ✏️ Cập nhật Certificate
+    entry fun update_certificate(
+        certificate: &mut CertificateNFT,
+        title: string::String,
+        issuer: string::String,
+        issue_date: string::String,
+        certificate_url: string::String,
+        description: string::String,
+        credential_id: string::String,
+        ctx: &sui::tx_context::TxContext
+    ) {
+        let sender_addr = sender(ctx);
+        assert!(certificate.owner == sender_addr, 2);
+        
+        certificate.title = title;
+        certificate.issuer = issuer;
+        certificate.issue_date = issue_date;
+        certificate.certificate_url = certificate_url;
+        certificate.description = description;
+        certificate.credential_id = credential_id;
+    }
+
+    /// 🗑️ Xóa Certificate (burn)
+    entry fun burn_certificate(
+        certificate: CertificateNFT,
+        ctx: &sui::tx_context::TxContext
+    ) {
+        let sender_addr = sender(ctx);
+        assert!(certificate.owner == sender_addr, 2);
+        
+        let CertificateNFT { 
+            id, 
+            owner: _, 
+            profile_id: _, 
+            title: _, 
+            issuer: _, 
+            issue_date: _, 
+            certificate_url: _, 
+            description: _, 
+            credential_id: _, 
+            created_at: _ 
+        } = certificate;
+        
+        object::delete(id);
+    }
+
     /// ✅ Xác thực Profile NFT (admin-only, cần thêm AdminCap sau)
     public fun verify_profile(
         profile: &mut ProfileNFT,
@@ -341,5 +468,52 @@ module dolpinder_profile::profiles {
     /// ⏰ Lấy thời gian tạo project
     public fun project_created_at(project: &Project): u64 {
         project.created_at
+    }
+
+    // === View Functions cho Certificate NFT ===
+
+    /// 🎓 Lấy title certificate
+    public fun certificate_title(cert: &CertificateNFT): string::String {
+        cert.title
+    }
+
+    /// 🏢 Lấy issuer
+    public fun certificate_issuer(cert: &CertificateNFT): string::String {
+        cert.issuer
+    }
+
+    /// 📅 Lấy issue date
+    public fun certificate_issue_date(cert: &CertificateNFT): string::String {
+        cert.issue_date
+    }
+
+    /// 🔗 Lấy certificate URL
+    public fun certificate_url(cert: &CertificateNFT): string::String {
+        cert.certificate_url
+    }
+
+    /// 📝 Lấy description
+    public fun certificate_description(cert: &CertificateNFT): string::String {
+        cert.description
+    }
+
+    /// 🆔 Lấy credential ID
+    public fun certificate_credential_id(cert: &CertificateNFT): string::String {
+        cert.credential_id
+    }
+
+    /// 👤 Lấy owner certificate
+    public fun certificate_owner(cert: &CertificateNFT): address {
+        cert.owner
+    }
+
+    /// 🔗 Lấy profile ID liên kết
+    public fun certificate_profile_id(cert: &CertificateNFT): address {
+        cert.profile_id
+    }
+
+    /// ⏰ Lấy thời gian tạo certificate
+    public fun certificate_created_at(cert: &CertificateNFT): u64 {
+        cert.created_at
     }
 }
