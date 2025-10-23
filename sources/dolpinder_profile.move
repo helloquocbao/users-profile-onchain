@@ -18,6 +18,7 @@ module dolpinder_profile::profiles {
         banner_url: string::String,
         social_links: vector<string::String>,
         project_count: u64,  // Số lượng projects
+        certificate_count: u64,  // Số lượng certificates
         verified: bool,
         created_at: u64,
     }
@@ -153,6 +154,7 @@ module dolpinder_profile::profiles {
             banner_url,
             social_links,
             project_count: 0,
+            certificate_count: 0,  // Khởi tạo = 0
             verified: false,
             created_at: sui::clock::timestamp_ms(clock),
         };
@@ -279,7 +281,7 @@ module dolpinder_profile::profiles {
 
     /// 🎓 Tạo Certificate NFT
     entry fun mint_certificate(
-        profile: &ProfileNFT,
+        profile: &mut ProfileNFT,
         title: string::String,
         issuer: string::String,
         issue_date: string::String,
@@ -308,6 +310,9 @@ module dolpinder_profile::profiles {
         };
         
         let cert_id = object::uid_to_address(&certificate.id);
+        
+        // Tăng certificate counter trong profile
+        profile.certificate_count = profile.certificate_count + 1;
         
         event::emit(CertificateCreated {
             certificate_id: cert_id,
@@ -414,6 +419,11 @@ module dolpinder_profile::profiles {
     /// ⏰ Lấy thời gian tạo
     public fun created_at(profile: &ProfileNFT): u64 {
         profile.created_at
+    }
+
+    /// 🎓 Lấy số lượng certificates
+    public fun get_certificate_count(profile: &ProfileNFT): u64 {
+        profile.certificate_count
     }
 
     /// 📊 Đếm tổng số profiles đã mint
