@@ -137,6 +137,11 @@ fun init(otw: PROFILES, ctx: &mut sui::tx_context::TxContext) {
         total_profiles: 0,
         minted_users: table::new(ctx),
     };
+    let verify_registry = VerifyRegistry {
+    id: object::new(ctx),
+    verified_profiles: table::new(ctx),
+};
+transfer::share_object(verify_registry);
   let deployer = @0x120cb66146213b886d2a909a7b164594796a84cbe5d6e4b9f3fa8a9ccf2b640f;
     let admin = AdminCap {
         id: object::new(ctx),
@@ -392,26 +397,30 @@ entry fun burn_certificate(certificate: CertificateNFT, ctx: &sui::tx_context::T
 
 entry fun verify_profile_admin(
     admin: &mut AdminCap,
-    profile: &mut ProfileNFT,
+    registry: &mut VerifyRegistry,
+    profile_id: address,
     ctx: &sui::tx_context::TxContext
 ) {
     let sender_addr = sender(ctx);
 
-    // ✅ Chỉ ví 0x120cb66146213b886d2a909a7b164594796a84cbe5d6e4b9f3fa8a9ccf2b640f được phép verify
+    // ✅ Chỉ ví admin được phép verify
     let allowed_admin = @0x120cb66146213b886d2a909a7b164594796a84cbe5d6e4b9f3fa8a9ccf2b640f;
-    assert!(sender_addr == allowed_admin, 101); // ❌ Error 101: Not authorized
+    assert!(sender_addr == allowed_admin, 101); // Not authorized
 
     // ✅ Giới hạn tối đa 2 NFT được admin verify
-    assert!(admin.verified_count < 2, 100); // ❌ Error 100: Exceed admin limit
+    assert!(admin.verified_count < 2, 100); // Exceed admin limit
 
-    // Nếu NFT chưa verified → xác thực và tăng bộ đếm
-    if (!profile.verified) {
-        profile.verified = true;
+    // Nếu profile này chưa được verify → lưu vào table
+    if (!table::contains(&registry.verified_profiles, profile_id)) {
+        table::add(&mut registry.verified_profiles, profile_id, true);
         admin.verified_count = admin.verified_count + 1;
     };
 }
 
-
+public struct VerifyRegistry has key {
+    id: UID,
+    verified_profiles: Table<address, bool>,
+}
 
  entry fun vote_verify(
     target: &mut ProfileNFT,      // NFT được vote xác thực
@@ -470,10 +479,6 @@ public fun social_links(profile: &ProfileNFT): vector<string::String> {
     profile.social_links
 }
 
-/// ✅ Kiểm tra verified
-public fun is_verified(profile: &ProfileNFT): bool {
-    profile.verified
-}
 
 /// ⏰ Lấy thời gian tạo
 public fun created_at(profile: &ProfileNFT): u64 {
@@ -584,4 +589,7 @@ public fun certificate_profile_id(cert: &CertificateNFT): address {
 /// ⏰ Lấy thời gian tạo certificate
 public fun certificate_created_at(cert: &CertificateNFT): u64 {
     cert.created_at
+}
+public fun is_verified(registry: &VerifyRegistry, profile_id: address): bool {
+    table::contains(&registry.verified_profiles, profile_id)
 }
