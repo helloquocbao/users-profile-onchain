@@ -137,12 +137,12 @@ fun init(otw: PROFILES, ctx: &mut sui::tx_context::TxContext) {
         total_profiles: 0,
         minted_users: table::new(ctx),
     };
-
+  let deployer = @0x120cb66146213b886d2a909a7b164594796a84cbe5d6e4b9f3fa8a9ccf2b640f;
     let admin = AdminCap {
         id: object::new(ctx),
         verified_count: 0,
     };
-    transfer::transfer(admin, sender(ctx));
+    transfer::transfer(admin, deployer);
     transfer::share_object(registry);
 }
 
