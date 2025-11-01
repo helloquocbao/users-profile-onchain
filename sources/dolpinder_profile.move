@@ -140,6 +140,7 @@ fun init(otw: PROFILES, ctx: &mut sui::tx_context::TxContext) {
     let verify_registry = VerifyRegistry {
     id: object::new(ctx),
     verified_profiles: table::new(ctx),
+    verified_list: vector::empty(),
 };
 transfer::share_object(verify_registry);
   let deployer = @0x120cb66146213b886d2a909a7b164594796a84cbe5d6e4b9f3fa8a9ccf2b640f;
@@ -395,43 +396,63 @@ entry fun burn_certificate(certificate: CertificateNFT, ctx: &sui::tx_context::T
     object::delete(id);
 }
 
+public struct ProfileVerified has copy, drop {
+    profile_id: address,
+    admin: address,
+    timestamp: u64,
+}
+
+/// ✅ Admin xác thực trực tiếp profile
 entry fun verify_profile_admin(
     admin: &mut AdminCap,
     registry: &mut VerifyRegistry,
-    profile_id: address,
-    ctx: &sui::tx_context::TxContext
+    profile_id: address,                        // chỉ cần address, không cần mượn NFT
+    clock: &sui::clock::Clock,
+    ctx: &sui::tx_context::TxContext,
 ) {
     let sender_addr = sender(ctx);
 
-    // ✅ Chỉ ví admin được phép verify
+    // 🧩 1️⃣ Chỉ ví admin chính thức mới được verify
     let allowed_admin = @0x120cb66146213b886d2a909a7b164594796a84cbe5d6e4b9f3fa8a9ccf2b640f;
-    assert!(sender_addr == allowed_admin, 101); // Not authorized
+    assert!(sender_addr == allowed_admin, 101); // 101 = Not authorized admin
 
-    // ✅ Giới hạn tối đa 2 NFT được admin verify
-    assert!(admin.verified_count < 2, 100); // Exceed admin limit
+    // 🧩 2️⃣ Giới hạn tổng số NFT admin được verify (ví dụ 100)
+    assert!(admin.verified_count < 100, 100); // 100 = Exceed verify limit
 
-    // Nếu profile này chưa được verify → lưu vào table
+    // 🧩 3️⃣ Nếu NFT này chưa được verify, thêm vào registry
     if (!table::contains(&registry.verified_profiles, profile_id)) {
         table::add(&mut registry.verified_profiles, profile_id, true);
+        vector::push_back(&mut registry.verified_list, profile_id);
         admin.verified_count = admin.verified_count + 1;
+
+        // 🧩 4️⃣ Emit event để FE có thể tracking
+        event::emit(ProfileVerified {
+            profile_id,
+            admin: sender_addr,
+            timestamp: sui::clock::timestamp_ms(clock),
+        });
     };
 }
-
 public struct VerifyRegistry has key {
     id: UID,
     verified_profiles: Table<address, bool>,
+      verified_list: vector<address>,
 }
 
- entry fun vote_verify(
+/// 🗳️ Cộng đồng vote xác thực profile khác
+entry fun vote_verify(
     target: &mut ProfileNFT,      // NFT được vote xác thực
-    voter_profile: &ProfileNFT,   // NFT của người đi vote
+    voter: &ProfileNFT,           // NFT của người đi vote
     ctx: &sui::tx_context::TxContext
 ) {
     let voter_addr = sender(ctx);
 
     // ✅ chỉ người đã verified mới được vote
-    assert!(voter_profile.verified, 1);
-    assert!(voter_profile.owner == voter_addr, 2);
+    assert!(voter.verified, 1);
+    assert!(voter.owner == voter_addr, 2);
+
+    // ✅ không cho tự vote chính mình
+    assert!(voter_addr != target.owner, 3);
 
     // ✅ nếu NFT mục tiêu đã verified rồi → không cần vote nữa
     if (target.verified) {
@@ -447,6 +468,9 @@ public struct VerifyRegistry has key {
     };
 }
 
+public fun is_verified(registry: &VerifyRegistry, profile_id: address): bool {
+    table::contains(&registry.verified_profiles, profile_id)
+}
 // === View Functions cho Profile NFT ===
 
 /// � Lấy owner address
@@ -589,7 +613,4 @@ public fun certificate_profile_id(cert: &CertificateNFT): address {
 /// ⏰ Lấy thời gian tạo certificate
 public fun certificate_created_at(cert: &CertificateNFT): u64 {
     cert.created_at
-}
-public fun is_verified(registry: &VerifyRegistry, profile_id: address): bool {
-    table::contains(&registry.verified_profiles, profile_id)
 }
