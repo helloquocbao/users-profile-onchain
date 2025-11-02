@@ -455,9 +455,7 @@ entry fun vote_verify(
     assert!(voter_addr != target.owner, 3);
 
     // ✅ nếu NFT mục tiêu đã verified rồi → không cần vote nữa
-    if (target.verified) {
-        return
-    };
+    assert!(!target.verified, 4);
 
     // ✅ tăng bộ đếm
     target.vote_count = target.vote_count + 1;
