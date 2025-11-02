@@ -137,9 +137,10 @@ fun init(otw: PROFILES, ctx: &mut sui::tx_context::TxContext) {
         total_profiles: 0,
         minted_users: table::new(ctx),
     };
-    let verify_registry = VerifyRegistry {
+   let verify_registry = VerifyRegistry {
     id: object::new(ctx),
     verified_profiles: table::new(ctx),
+    vote_count: table::new(ctx), // 🆕
 };
 transfer::share_object(verify_registry);
   let deployer = @0x120cb66146213b886d2a909a7b164594796a84cbe5d6e4b9f3fa8a9ccf2b640f;
@@ -420,11 +421,14 @@ entry fun verify_profile_admin(
 public struct VerifyRegistry has key {
     id: UID,
     verified_profiles: Table<address, bool>,
+    vote_count: Table<address, u64>, 
 }
 
- entry fun vote_verify(
-    target: &mut ProfileNFT,      // NFT được vote xác thực
-    voter_profile: &ProfileNFT,   // NFT của người đi vote
+/// ✅ Mọi người đều có thể vote cho Profile khác (dựa trên VerifyRegistry)
+entry fun vote_verify(
+    registry: &mut VerifyRegistry,  // shared registry (được share trong init)
+    target_profile_id: address,     // ID của Profile được vote
+    voter_profile: &ProfileNFT,     // NFT của người đi vote
     ctx: &sui::tx_context::TxContext
 ) {
     let voter_addr = sender(ctx);
@@ -433,16 +437,42 @@ public struct VerifyRegistry has key {
     assert!(voter_profile.verified, 1);
     assert!(voter_profile.owner == voter_addr, 2);
 
-    // ✅ nếu NFT mục tiêu đã verified rồi → không cần vote nữa
-    assert!(!target.verified, 4);
-
-    // ✅ tăng bộ đếm
-    target.vote_count = target.vote_count + 1;
-
-    // ✅ khi đủ 2 vote trở lên → tự động verified
-    if (target.vote_count >= 2) {
-        target.verified = true;
+    // ✅ nếu target đã verified rồi → không cần vote nữa
+    if (table::contains(&registry.verified_profiles, target_profile_id)) {
+        return
     };
+
+    // ✅ Lấy số phiếu hiện tại (nếu có)
+    let mut current_votes = 0;
+    if (table::contains(&registry.verified_profiles, target_profile_id)) {
+        // Đã verified, bỏ qua
+        return
+    };
+    if (table::contains(&registry.vote_count, target_profile_id)) {
+        current_votes = *table::borrow(&registry.vote_count, target_profile_id);
+        let vote_ref = table::borrow_mut(&mut registry.vote_count, target_profile_id);
+        *vote_ref = *vote_ref + 1;
+    } else {
+        table::add(&mut registry.vote_count, target_profile_id, 1);
+    };
+
+    let new_votes = current_votes + 1;
+
+    // ✅ Nếu đủ 2 phiếu → verified
+    if (new_votes >= 2) {
+        table::add(&mut registry.verified_profiles, target_profile_id, true);
+    };
+
+    // ✅ Gửi event ra FE
+    event::emit(ProfileVoted {
+        target_id: target_profile_id,
+        voter_id: object::uid_to_address(&voter_profile.id),
+    });
+}
+
+public struct ProfileVoted has copy, drop, store {
+    target_id: address,
+    voter_id: address,
 }
 
 // === View Functions cho Profile NFT ===
